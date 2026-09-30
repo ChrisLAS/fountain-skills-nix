@@ -7,10 +7,11 @@
     { self, nixpkgs }:
     let
       lib = nixpkgs.lib;
+      # NixOS is the only supported target: this fork exists for hosts that
+      # manage their own software, and the skills use Linux-only paths.
       systems = [
         "x86_64-linux"
         "aarch64-linux"
-        "darwin"
       ];
       forAllSystems = lib.genAttrs systems;
       pkgsFor = system: nixpkgs.legacyPackages.${system};
@@ -21,7 +22,10 @@
       # plain directory holding SKILL.md, so no unpacking or generation is
       # needed.
       skills = forAllSystems (system:
-        pkgsFor system).stdenvNoCC.mkDerivation {
+        let
+          pkgs = pkgsFor system;
+        in
+        pkgs.stdenvNoCC.mkDerivation {
           pname = "fountain-skills";
           version = "1.23.0";
 
@@ -34,7 +38,8 @@
             runHook preInstall
 
             mkdir -p "$out"
-            cp -R ./skills "$out/skills"
+            # `src` is the skills directory itself, so it becomes $out/skills.
+            cp -R "$src" "$out/skills"
 
             runHook postInstall
           '';
@@ -62,7 +67,9 @@
         });
 
       devShells = forAllSystems (system:
-        let pkgs = pkgsFor system; in
+        let
+          pkgs = pkgsFor system;
+        in
         {
           default = pkgs.mkShell {
             packages = [
