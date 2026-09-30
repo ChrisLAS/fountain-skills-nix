@@ -9,10 +9,13 @@ face detection and visual-person-qa.py.
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 REQUIRED_FILTERS = {
@@ -21,6 +24,35 @@ REQUIRED_FILTERS = {
     "text": {"drawtext"},
     "words": {"whisper"},
 }
+
+# Host Faster-Whisper service. It returns the same {word,start,end} shape as the
+# whisper filter would, so nothing downstream changes. Set
+# HERMES_LOCAL_TRANSCRIPTION_URL to move it off loopback.
+STT_URL = os.environ.get(
+    "HERMES_LOCAL_TRANSCRIPTION_URL", "http://127.0.0.1:8766"
+).rstrip("/")
+
+
+def local_stt_health(timeout=2.0):
+    """Report whether the host transcription service can serve word timings.
+
+    Returns (ok, detail). A busy service is not a fault: it means another
+    transcription holds the model, and the caller should wait.
+    """
+    try:
+        with urllib.request.urlopen(f"{STT_URL}/healthz", timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+        return False, f"local transcription service unreachable at {STT_URL}: {exc}"
+    if payload.get("busy"):
+        return False, (
+            f"local transcription service is busy ({payload.get('busy_reason')}); "
+            "wait for it rather than starting a competing job"
+        )
+    return True, (
+        f"local transcription service ready ({payload.get('model')}, "
+        f"compute_type={payload.get('compute_type')})"
+    )
 
 
 def run(cmd):
@@ -194,11 +226,22 @@ def main():
     parser.add_argument(
         "--require-words",
         action="store_true",
-        help="Fail if no ffmpeg carries the whisper filter, or if no whisper model file is found.",
+        help="Fail if no source of word timings is available.",
     )
     parser.add_argument(
         "--whisper-model",
         help="Path of the whisper.cpp model to time words with. Searched for when not given.",
+    )
+    parser.add_argument(
+        "--words-source",
+        choices=["auto", "service", "ffmpeg"],
+        default="auto",
+        help=(
+            "Where word timings come from. 'service' uses the host Faster-Whisper "
+            "service, which is preferred on NixOS. 'ffmpeg' uses an ffmpeg whisper "
+            "filter build plus a whisper.cpp model. 'auto' prefers the service and "
+            "falls back to ffmpeg."
+        ),
     )
     parser.add_argument("--require-magick", action="store_true")
     parser.add_argument(
@@ -275,21 +318,52 @@ def main():
 
         # Word timings come from whisper on the clip's own audio, so a build
         # without it stops captions, trims and shots after the master is cut.
+        #
+        # The host Faster-Whisper service is preferred. It returns the same
+        # {word,start,end} shape, needs no 141 MB model file, and cannot hang the
+        # way a whisper-filter build with no model does.
+        service_ok, service_detail = local_stt_health()
+        report["local_transcription_service"] = {
+            "url": STT_URL,
+            "ok": service_ok,
+            "detail": service_detail,
+        }
+
+        ffmpeg_words = None
         if "whisper" in filters:
-            report["ffmpeg_for_words"] = args.ffmpeg
+            ffmpeg_words = args.ffmpeg
         else:
-            report["ffmpeg_for_words"] = find_capable_ffmpeg("words", exclude=args.ffmpeg)
-            if args.require_words and not report["ffmpeg_for_words"]:
-                report["missing"].append("ffmpeg filter:whisper (no whisper-capable ffmpeg found on this machine)")
+            ffmpeg_words = find_capable_ffmpeg("words", exclude=args.ffmpeg)
 
         # The filter alone transcribes nothing: it takes a whisper.cpp model file,
         # and with none it loads its backend and then hangs rather than failing.
-        report["whisper_model"] = find_whisper_model(args.whisper_model)
-        if args.require_words and not report["whisper_model"]:
-            report["missing"].append(
-                "whisper model (the whisper filter takes a model file and hangs without one) - "
-                f"install it one time, about 141 MB: {WHISPER_MODEL_INSTALL}"
-            )
+        whisper_model = find_whisper_model(args.whisper_model)
+        report["whisper_model"] = whisper_model
+
+        if args.words_source == "service":
+            words_source = "service" if service_ok else None
+        elif args.words_source == "ffmpeg":
+            words_source = "ffmpeg" if (ffmpeg_words and whisper_model) else None
+        else:
+            words_source = "service" if service_ok else ("ffmpeg" if ffmpeg_words and whisper_model else None)
+
+        report["words_source"] = words_source
+        if words_source == "service":
+            report["ffmpeg_for_words"] = None
+        elif words_source == "ffmpeg":
+            report["ffmpeg_for_words"] = ffmpeg_words
+        else:
+            report["ffmpeg_for_words"] = None
+            if args.require_words:
+                if not service_ok:
+                    report["missing"].append(
+                        f"word timings: {service_detail}; and no whisper-capable ffmpeg with a model was found"
+                    )
+                elif not (ffmpeg_words and whisper_model):
+                    report["missing"].append(
+                        "word timings: the local transcription service is unavailable and no "
+                        "whisper-capable ffmpeg with a model was found"
+                    )
 
         if args.require_magick and not shutil.which("magick"):
             report["missing"].append("magick")
@@ -336,6 +410,14 @@ def main():
         print(f"caption renderer: {report['caption_renderer'] or 'none'}")
         if report.get("ffmpeg_for_captions") and report["ffmpeg_for_captions"] != report["ffmpeg"]:
             print(f"burn captions with: {report['ffmpeg_for_captions']}")
+        words = report.get("words_source")
+        if words == "service":
+            svc = report.get("local_transcription_service") or {}
+            print(f"word timings: local transcription service ({svc.get('url')})")
+        elif words == "ffmpeg":
+            print(f"word timings: ffmpeg whisper filter ({report.get('ffmpeg_for_words')})")
+        else:
+            print("word timings: none available")
         for font in report["fonts"]:
             status = "OK" if font["matched"] else "FALLBACK"
             print(f"font '{font['requested']}': {status} (resolved: {font['resolved'] or 'none'})")

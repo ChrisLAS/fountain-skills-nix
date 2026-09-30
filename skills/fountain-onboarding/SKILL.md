@@ -50,12 +50,17 @@ You MUST read HOUSEKEEPING.md if you haven't already.
 6. If there are no connected social channels, suggest connecting YouTube, X, or Instagram via the Social API.
 7. Ensure the project preferences specify the source of clip material, automation (auto-render, etc.),
    email addresses to send the reports to, and any other relevant details.
-8. When running locally, ensure all relevant software is installed: Python 3.11 or above, yt-dlp,
-   ffmpeg + ffprobe (the most complete version that includes libass, drawtext, fontconfig and whisper,
-   e.g. Homebrew `ffmpeg-full`), OpenCV 4.8 or later, ImageMagick, and a whisper.cpp model file
-   (`ggml-base.en.bin` in `~/.cache/whisper`).
-   If something is missing, attempt to install it yourself.
-   If you cannot install it, make it easy for the user to install it themselves, even if they are non-technical.
+8. When running locally, check that the software this skill needs is present:
+   Python 3.11 or above, yt-dlp, ffmpeg + ffprobe (with libass, drawtext and
+   fontconfig), OpenCV 4.8 or later, and ImageMagick.
+   On a NixOS host, take all of this from Nix. Read `NIXOS.md` in the root of
+   fountain-skills for the exact package set.
+   Do not install anything. Do not run `brew`, `apt`, or `pip install`.
+   On this host, take word timings from the local Faster-Whisper service
+   instead of an ffmpeg `whisper` filter. See `NIXOS.md`, "Transcription and
+   word timings", and check `http://127.0.0.1:8766/healthz` before a run.
+   If something is missing, report exactly what is missing and stop.
+   The operator installs software, not the agent.
 9. Research the look of the show: its artwork, its website, and its existing clips.
    Write out brand guidelines from that research.
    Choose the caption style (using skill **fountain-clip-producer**), color, and font.
@@ -65,6 +70,10 @@ You MUST read HOUSEKEEPING.md if you haven't already.
    Offer to customize the style on the clip styling page.
 10. Set up automatic daily growth using skill **fountain-daily-growth**.
     Record its time and the machine that runs it under Automation.
+    On a NixOS host, scheduling belongs to systemd timers that the operator
+    configures, not to a scheduler the agent writes. Propose the time, record
+    the preference, and tell the operator which timer needs to exist.
+    The agent must not create its own schedule.
 
 ## Additional notes
 

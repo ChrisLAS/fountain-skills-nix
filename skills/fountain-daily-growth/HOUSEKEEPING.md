@@ -54,6 +54,9 @@ Config:
 - MUST read https://fountain.fm/docs.md in each new session
 - Find the API key in the `FOUNTAIN_API_KEY` environment variable or in `.env`
 - If no key, ask the user to make one at https://fountain.fm/studio/projects
+- On a NixOS host the key lives in a secrets file, not in `.env`.
+  Ask the operator for its path if you cannot find the environment variable.
+  Never read a secret into your context or echo its contents.
 - A Fountain key starts with `fountain_`.
   If a request fails to authenticate and the key has a different prefix, the key is for another service.
   You MUST tell the user.
@@ -71,7 +74,12 @@ Config:
 - Write a large response to a file and read only the part you need.
 - You CAN write a throwaway script, e.g. to repeat one request over many items.
   Put it in a temporary place and delete it at the end of the session.
-  You MUST NOT keep a script that wraps the API, because the API can change.
+- You MUST NOT keep an ad-hoc script that wraps the API, because the API can change.
+- On a NixOS host, a durable wrapper that the host repository owns, versions,
+  and tests is preferred instead.
+  Such a wrapper outlives the session that wrote it and can be verified.
+  See `NIXOS.md`, "Durable API wrappers".
+  Delete genuinely one-off scratch work.
 
 ## Setup
 
@@ -242,6 +250,11 @@ If data is available from an API, you MUST load it from the API.
 You MUST NOT keep a local copy of that data.
 A file under `fountain` is working material.
 The file is a setting only when the preferences name its path.
+
+On a NixOS host, this path is a working directory inside a managed state
+directory, not a folder the agent creates wherever it likes.
+Use the state directory the host configuration names.
+Do not write outside it, and do not write into a Nix store path.
 
 ### Outputs
 
