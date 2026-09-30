@@ -52,6 +52,7 @@ You MUST read HOUSEKEEPING.md if you haven't already.
 2. Run module **performance-review** to turn yesterday's posts and their numbers into lessons.
    Skip it when a render machine sends the report, because that machine runs it.
 3. Run module **episode-watch** to brief the episodes that the show published since the last run.
+   Give it the list of episodes that step 1 read, so it does not list them again.
    It hands its own briefs on, so step 5 is for the trends alone.
 4. Run module **trend-discovery** to score today's trends and shape the strongest into briefs.
 5. Hand each brief to skill **fountain-clip-finder**, and do not read its result.
